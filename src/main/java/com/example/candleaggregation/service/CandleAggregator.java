@@ -54,7 +54,7 @@ public class CandleAggregator {
         });
     }
 
-    /** Returns a snapshot of the currently open candle, or null if none exists for this key. */
+    // Returns a snapshot of the currently open candle, or null if none exists for this key.
     public Candle getLiveCandle(String symbol, Interval interval) {
         LiveCandle live = liveCandles.get(symbol + ":" + interval.getLabel());
         return live != null ? live.toCandle() : null;
