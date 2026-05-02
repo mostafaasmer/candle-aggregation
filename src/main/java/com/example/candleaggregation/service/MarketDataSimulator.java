@@ -1,13 +1,13 @@
 package com.example.candleaggregation.service;
 
+import com.example.candleaggregation.config.KafkaConfig;
 import com.example.candleaggregation.model.BidAskEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Component
@@ -20,17 +20,13 @@ public class MarketDataSimulator {
     // Per-symbol mid-prices for random-walk simulation; accessed only from the scheduler thread
     private final double[] midPrices = {65_000.0, 3_500.0, 180.0};
 
-    private final CandleAggregator aggregator;
-    private final Executor executor;
+    private final KafkaTemplate<Object, Object> kafkaTemplate;
 
-    public MarketDataSimulator(CandleAggregator aggregator,
-                               @Qualifier("candleExecutor") Executor executor) {
-        this.aggregator = aggregator;
-        this.executor = executor;
+    public MarketDataSimulator(KafkaTemplate<Object, Object> kafkaTemplate) {
+        this.kafkaTemplate = kafkaTemplate;
     }
 
-    // Fires 5 times per second; each symbol event is dispatched to the thread pool
-    @Scheduled(fixedRate = 30000)
+    @Scheduled(fixedRate = 30_000)
     public void generateTick() {
         long now = System.currentTimeMillis() / 1000L;
         for (int i = 0; i < SYMBOLS.length; i++) {
@@ -42,8 +38,17 @@ public class MarketDataSimulator {
                 midPrices[i] + spread,
                 now
             );
-            log.debug("Simulated tick {} bid={} ask={}", event.symbol(), event.bid(), event.ask());
-            executor.execute(() -> aggregator.process(event));
+            kafkaTemplate.send(KafkaConfig.BID_ASK_TOPIC, event.symbol(), event)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        log.error("Failed to publish tick for {}: {}", event.symbol(), ex.getMessage());
+                    } else {
+                        log.debug("Published {} @ partition={} offset={}",
+                            event.symbol(),
+                            result.getRecordMetadata().partition(),
+                            result.getRecordMetadata().offset());
+                    }
+                });
         }
     }
 }
